@@ -48,6 +48,7 @@ static int compress_file(FILE *infile, FILE *outfile, const struct options opt[s
     size_t readamount = COMPRESS_BUFSIZ;
     size_t bread, inlen;
     size_t tread = 0;
+    size_t twrite = 0;
     int ret = 0;
 
     inbuf = malloc(readamount);
@@ -72,14 +73,24 @@ static int compress_file(FILE *infile, FILE *outfile, const struct options opt[s
         outbuf = malloc(cout);
         compress2(outbuf, &cout, inbuf, bread, opt->harder ? 9 : -1);
 
-        if (opt->verbose) {
-            printf("compressed %zu bytes to %zu bytes (%lu%%, %lu%% complete)\n", bread, cout, (cout * 100) / bread, (tread * 100) / inlen);
-        }
-
         write_le_uint32(outfile, cout);
         write_le_uint32(outfile, bread);
-        fwrite(outbuf, cout, 1, outfile);
+
+        if (fwrite(outbuf, 1, cout, outfile) != cout) {
+            fprintf(stderr, "error: unable to write compressed data: %s\n", strerror(errno));
+            free(outbuf);
+            ret = - 1;
+            goto out;
+        }
+
+        twrite += cout;
         free(outbuf);
+    }
+    
+    if (opt->verbose) {
+        fprintf(stdout, "uz2 %s (%zu bytes) => %s", opt->infile, inlen, opt->outfile);
+        fprintf(stdout, " (%zu bytes, %lu%%)\n", twrite, (twrite * 100) / inlen);
+        fflush(stdout);
     }
 
 out:
@@ -137,10 +148,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    if (truncate(options.outfile, 0) != 0) {
-        fprintf(stderr, "error: unable to truncate '%s': %s\n", options.outfile, strerror(errno));
-        return EXIT_FAILURE;
-    }
+    truncate(options.outfile, 0);
 
     FILE *out = fopen(options.outfile, "wb");
     if (out == NULL) {
